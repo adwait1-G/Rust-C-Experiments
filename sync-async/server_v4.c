@@ -67,10 +67,10 @@ int main (int argc, char **argv)
     const char          *ip_addr = argv[1];
     uint16_t            port_no = atoi(argv[2]);
     fd_set              read_set = {0};
-    bool                fds_list[FD_SETSIZE] = {0};
+    bool                fds_list[FD_SETSIZE] = {false};
 
     // Lets create a socket.
-    ret = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    ret = socket(AF_INET, SOCK_STREAM, 0);
     if (ret < 0)
     {
         printf("socket() failed\n");
@@ -108,8 +108,22 @@ int main (int argc, char **argv)
     {
         memset(&client_addr, '\0', sizeof(client_addr));
 
+        printf("These are the descriptors being monitored\n");
+
         // Copy.
         FD_SET(sock_fd, &read_set);
+        for (i = 0; i < FD_SETSIZE; i++)
+        {
+            if (FD_ISSET(i, &read_set))
+            {
+                printf("%d is being monitored\n", i);
+            }
+
+            if (fds_list[i] == true)
+            {
+                printf("%d is a valid descriptor\n", i);
+            }
+        }
 
         printf("Waiting for select() to succeed\n");
         ret = select(FD_SETSIZE, &read_set, NULL, NULL, NULL);
@@ -127,8 +141,9 @@ int main (int argc, char **argv)
         // If this comes true, that means we have an incoming connection
         // waiting to be accepted.
         if (FD_ISSET(sock_fd, &read_set))
-        {
-            ret = accept4(sock_fd, (struct sockaddr *)&client_addr, &client_addr_len, SOCK_NONBLOCK);
+        {   
+            printf("Inside sock_fd if\n");
+            ret = accept(sock_fd, (struct sockaddr *)&client_addr, &client_addr_len);
             if (ret < 0)
             {
                 printf("accept4() failed\n");
@@ -137,12 +152,20 @@ int main (int argc, char **argv)
             client_fd = ret;
             printf("client_fd = %d\n", client_fd);
 
-            // We need to store this descriptor in our array.
-            // If a descriptor(say 5) is in use, the kernel will never
-            // return 5 as the descriptor for another socket/file.
-            // So, we can go ahead and save it.
+            // We want select to keep an eye on this new socket.
             fds_list[client_fd] = true;
-            FD_SET(client_fd, &read_set);
+
+            // When select returns, read_set would be modified
+            // to keep just the "ready" descriptors. A couple of them
+            // might be lost. Need to update read_set before
+            // we pass it to select again.
+            for (i = 0; i < FD_SETSIZE; i++)
+            {
+                if (fds_list[i] == true)
+                {
+                    FD_SET(i, &read_set);
+                }
+            }
         }
         else // This should cover all the other socket descriptors
         {
@@ -150,25 +173,30 @@ int main (int argc, char **argv)
             // which descriptor is present in the read/write/error sets?
             for (i = 0; i < FD_SETSIZE; i++)
             {   
-                // If that socket exists
+                printf("Inside for: %d\n", i);
+                // Check if this socket exists
                 if (fds_list[i] == true)
-                {   
-                    printf("FD: %d\n", i);
-                    // Can we read from it?
-                    // Did we receive any data at this descriptor?
+                {   printf("Inside if\n");
+                    // If it is ready to read, go for it.
                     if (FD_ISSET(i, &read_set))
-                    {   
+                    {
+                        printf("FD: %d\n", i);
                         // Read that data, and send back a response
                         serve_connection(i);
                         close(i);
                         FD_CLR(i, &read_set);
                         fds_list[i] = false;
                     }
+                    else
+                    {   
+                        // If it is not ready to be read
+                        // but is a valid descriptor, then
+                        // select should monitor it.
+                        FD_SET(i, &read_set);
+                    }
+                    
                 }
             }
         }
-
-
-        i += 1;
     }
 }
