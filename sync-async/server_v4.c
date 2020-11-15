@@ -100,7 +100,7 @@ int main (int argc, char **argv)
     printf("Listening at (%s, %u)\n", ip_addr, port_no);
 
     // Before entering, initialize everything we need to call select.
-    // These sets are passed to select, they get altered when select succeeds.
+    // This set is passed to select, it gets altered when select succeeds.
     FD_ZERO(&read_set);
 
     // Do the thing
@@ -108,31 +108,17 @@ int main (int argc, char **argv)
     {
         memset(&client_addr, '\0', sizeof(client_addr));
 
-        printf("These are the descriptors being monitored\n");
-
         // Copy.
         FD_SET(sock_fd, &read_set);
-        for (i = 0; i < FD_SETSIZE; i++)
-        {
-            if (FD_ISSET(i, &read_set))
-            {
-                printf("%d is being monitored\n", i);
-            }
-
-            if (fds_list[i] == true)
-            {
-                printf("%d is a valid descriptor\n", i);
-            }
-        }
 
         printf("Waiting for select() to succeed\n");
         ret = select(FD_SETSIZE, &read_set, NULL, NULL, NULL);
-        if (ret < 0)
+        if (ret <= 0)
         {
             printf("select() failed\n");
             return -1;
         }
-        printf("After select!\n");
+        printf("After select, %d descriptors are ready!\n", ret);
         // Suppose it succeeds, we don't know which sockets are ready.
         // All the "ready" sockets are set in those sets.
         // We know the socket value, we need to go over them and see
