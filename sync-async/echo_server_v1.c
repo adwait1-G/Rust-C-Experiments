@@ -18,35 +18,54 @@
 #include <sys/select.h>
 #include <stdbool.h>
 
-void serve_connection (int client_fd)
+// serve_connection can have different return values.
+// Based on it, we need to take action in the main
+// function.
+enum 
+{
+    SERVE_CONN_FAILED,
+    SERVE_CONN_SUCCESS,
+    SERVE_CONN_CLIENT_DISCONN,
+};
+
+int serve_connection (int client_fd)
 {   
     uint8_t         request_buffer[10000] = {0};
-    uint8_t         response_buffer[10000] = {0};
     int             ret = 0;
+    int             req_len = 0;
 
-    // Only one request response!
+	printf("Inside serve_connection for descriptor %d\n", client_fd);
+
+    // Recv it
+    // What if the client sends more than 10,000 bytes of data?
     ret = recv(client_fd, request_buffer, sizeof(request_buffer), 0);
-    printf("recv() on fd %d return %d\n", client_fd, ret);
+	printf("recv ret = %d\n", ret);
     if (ret < 0)
     {
         printf("recv() failed for fd = %d\n", ret);
-        return;
+        return SERVE_CONN_FAILED;
+    }
+    else if (ret == 0)
+    {
+        // This is the case when the other side of the
+        // connection has disconnected.
+        return SERVE_CONN_CLIENT_DISCONN;
     }
 
-    // Print the request (symbolic of processing the request)
-    printf("%d: %s\n", client_fd, request_buffer);
+    req_len = ret;
 
     // Send back response
-    ret = send(client_fd, "Hello from server!", 19, 0);
+    // Can this be blocking?
+    ret = send(client_fd, request_buffer, req_len, 0);
     printf("send() for descriptor %d return %d\n", client_fd, ret);
-    if (ret < 19)
+    if (ret < req_len)
     {
         printf("send() failed for fd = %d\n", ret);
-        return;
+        return SERVE_CONN_FAILED;
     }
 
     // Done, go back.
-    return;
+    return SERVE_CONN_SUCCESS;
 }
 
 
@@ -139,8 +158,18 @@ int main (int argc, char **argv)
             client_fd = ret;
             printf("client_fd = %d\n", client_fd);
 
-            // We want select to keep an eye on this new socket.
-            fds_list[client_fd] = true;
+			// select won't be able to handle any descriptor with value
+			// >= FD_SETSIZE (which is 1024). Check it and kill it
+			// if the descriptor is greater.
+			if (client_fd >= FD_SETSIZE)
+			{
+				close (client_fd);
+			}
+			else
+			{
+            	// We want select to keep an eye on this new socket.
+            	fds_list[client_fd] = true;
+			}
 
             // When select returns, read_set would be modified
             // to keep just the "ready" descriptors. A couple of them
@@ -160,19 +189,38 @@ int main (int argc, char **argv)
             // which descriptor is present in the read/write/error sets?
             for (i = 0; i < FD_SETSIZE; i++)
             {   
-                printf("Inside for: %d\n", i);
                 // Check if this socket exists
                 if (fds_list[i] == true)
-                {   printf("Inside if\n");
+                {
                     // If it is ready to read, go for it.
                     if (FD_ISSET(i, &read_set))
                     {
                         printf("FD: %d\n", i);
-                        // Read that data, and send back a response
-                        serve_connection(i);
-                        // close(i);
-                        // FD_CLR(i, &read_set);
-                        // fds_list[i] = false;
+
+						// Let us serve it.
+                        ret = serve_connection(i);
+                        if (ret == SERVE_CONN_FAILED || ret == SERVE_CONN_CLIENT_DISCONN)
+                        {
+                            // If something failed, shutdown the client.
+                            // If recv returns 0, it means that the other side
+                            // has closed the connection. We need to do it
+                            // as well.
+                            close(i);
+                            FD_CLR(i, &read_set);
+                            fds_list[i] = false;
+                        }
+
+                        // On success, we should do nothing.
+                        // Just play along.
+                        
+						// Because this is an echo server,
+						// the client can talk to the server
+						// for how much time it wants.
+						// We should not be closing the connection.
+
+                        // The descriptor which was just served
+                        // is already present in read_set.
+                        // Let it be. We want select to monitor it.
                     }
                     else
                     {   
